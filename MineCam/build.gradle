@@ -1,10 +1,26 @@
-import org.codehaus.plexus.util.Os
+import org.gradle.internal.os.OperatingSystem
+
+// ponytail: Project.exec() was removed in Gradle 9 (replaced by injected
+// ExecOperations, which plain build scripts can't easily get at). ProcessBuilder
+// is stdlib and version-proof, so every "run this external command" task below
+// goes through here instead of chasing the Gradle exec API across versions.
+def runCmd(List<String> command, File workDir = null, File redirectOut = null) {
+    def pb = new ProcessBuilder(command.collect { it.toString() })
+    if (workDir != null) pb.directory(workDir)
+    pb.redirectError(ProcessBuilder.Redirect.INHERIT)
+    pb.redirectOutput(redirectOut != null ? ProcessBuilder.Redirect.to(redirectOut) : ProcessBuilder.Redirect.INHERIT)
+    def exitCode = pb.start().waitFor()
+    if (exitCode != 0) {
+        throw new GradleException("Command failed (exit ${exitCode}): ${command.join(' ')}")
+    }
+}
 
 plugins {
+    id 'java'
     id 'eclipse'
     id 'idea'
     id 'maven-publish'
-    id 'net.minecraftforge.gradle' version '[6.0.16,6.2)'
+    id 'net.minecraftforge.gradle' version '[7.0.17,8)'
 }
 
 version = mod_version
@@ -14,92 +30,31 @@ base {
     archivesName = mod_id
 }
 
-// Mojang ships Java 17 to end users in 1.18+, so your mod should target Java 17.
-java.toolchain.languageVersion = JavaLanguageVersion.of(17)
+// Mojang ships Java 25 to end users in 26.1+, so your mod should target Java 25.
+java.toolchain.languageVersion = JavaLanguageVersion.of(25)
 
 println "Java: ${System.getProperty 'java.version'}, JVM: ${System.getProperty 'java.vm.version'} (${System.getProperty 'java.vendor'}), Arch: ${System.getProperty 'os.arch'}"
 minecraft {
-    // The mappings can be changed at any time and must be in the following format.
-    // Channel:   Version:
-    // official   MCVersion             Official field/method names from Mojang mapping files
-    // parchment  YYYY.MM.DD-MCVersion  Open community-sourced parameter names and javadocs layered on top of official
-    //
-    // You must be aware of the Mojang license when using the 'official' or 'parchment' mappings.
-    // See more information here: https://github.com/MinecraftForge/MCPConfig/blob/master/Mojang.md
-    //
-    // Parchment is an unofficial project maintained by ParchmentMC, separate from MinecraftForge
-    // Additional setup is needed to use their mappings: https://parchmentmc.org/docs/getting-started
-    //
-    // Use non-default mappings at your own risk. They may not always work.
-    // Simply re-run your setup task after changing the mappings to update your workspace.
-    mappings channel: mapping_channel, version: mapping_version
-
-    // When true, this property will have all Eclipse/IntelliJ IDEA run configurations run the "prepareX" task for the given run configuration before launching the game.
-    // In most cases, it is not necessary to enable.
-    // enableEclipsePrepareRuns = true
-    // enableIdeaPrepareRuns = true
-
-    // This property allows configuring Gradle's ProcessResources task(s) to run on IDE output locations before launching the game.
-    // It is REQUIRED to be set to true for this template to function.
-    // See https://docs.gradle.org/current/dsl/org.gradle.language.jvm.tasks.ProcessResources.html
-    copyIdeResources = true
-
-    // When true, this property will add the folder name of all declared run configurations to generated IDE run configurations.
-    // The folder name can be set on a run configuration using the "folderName" property.
-    // By default, the folder name of a run configuration is the name of the Gradle project containing it.
-    // generateRunFolders = true
-
-    // This property enables access transformers for use in development.
-    // They will be applied to the Minecraft artifact.
-    // The access transformer file can be anywhere in the project.
-    // However, it must be at "META-INF/accesstransformer.cfg" in the final mod jar to be loaded by Forge.
-    // This default location is a best practice to automatically put the file in the right place in the final jar.
-    // See https://docs.minecraftforge.net/en/latest/advanced/accesstransformers/ for more information.
-    // accessTransformer = file('src/main/resources/META-INF/accesstransformer.cfg')
-
-    // Default run configurations.
-    // These can be tweaked, removed, or duplicated as needed.
     runs {
-        // applies to all the run configs below
         configureEach {
-            workingDirectory project.file('run')
+            workingDir = layout.projectDirectory.dir('run')
 
-            // Recommended logging data for a userdev environment
-            // The markers can be added/remove as needed separated by commas.
-            // "SCAN": For mods scan.
-            // "REGISTRIES": For firing of registry events.
-            // "REGISTRYDUMP": For getting the contents of all registries.
-            property 'forge.logging.markers', 'REGISTRIES'
-
-            // Recommended logging level for the console
-            // You can set various levels here.
-            // Please read: https://stackoverflow.com/questions/2031163/when-to-use-the-different-log-levels
-            property 'forge.logging.console.level', 'debug'
+            systemProperty 'eventbus.api.strictRuntimeChecks', 'true'
+            systemProperty 'forge.enabledGameTestNamespaces', mod_id
         }
 
-        client {
-            // Comma-separated list of namespaces to load gametests from. Empty = all namespaces.
-            property 'forge.enabledGameTestNamespaces', mod_id
-        }
+        register('client')
 
-        server {
-            property 'forge.enabledGameTestNamespaces', mod_id
+        register('server') {
             args '--nogui'
         }
 
-        // This run config launches GameTestServer and runs all registered gametests, then exits.
-        // By default, the server will crash when no gametests are provided.
-        // The gametest system is also enabled by default for other run configs under the /test command.
-        gameTestServer {
-            property 'forge.enabledGameTestNamespaces', mod_id
-        }
+        register('gameTestServer')
 
-        data {
-            // example of overriding the workingDirectory set in configureEach above
-            workingDirectory project.file('run-data')
+        register('data') {
+            workingDir = layout.projectDirectory.dir('run-data')
 
-            // Specify the modid for data generation, where to output the resulting resource, and where to look for existing resources.
-            args '--mod', mod_id, '--all', '--output', file('src/generated/resources/'), '--existing', file('src/main/resources/')
+            args '--mod', mod_id, '--all', '--output', layout.projectDirectory.dir('src/generated/resources'), '--existing', layout.projectDirectory.dir('src/main/resources')
         }
     }
 }
@@ -108,38 +63,15 @@ minecraft {
 sourceSets.main.resources { srcDir 'src/generated/resources' }
 
 repositories {
-    // Put repositories for dependencies here
-    // ForgeGradle automatically adds the Forge maven and Maven Central for you
-
-    // If you have mod jar dependencies in ./libs, you can declare them as a repository like so.
-    // See https://docs.gradle.org/current/userguide/declaring_repositories.html#sub:flat_dir_resolver
-    // flatDir {
-    //     dir 'libs'
-    // }
+    minecraft.mavenizer(it)
+    maven fg.forgeMaven
+    maven fg.minecraftLibsMaven
+    mavenCentral()
 }
 
 dependencies {
-    // Specify the version of Minecraft to use.
-    // Any artifact can be supplied so long as it has a "userdev" classifier artifact and is a compatible patcher artifact.
-    // The "userdev" classifier will be requested and setup by ForgeGradle.
-    // If the group id is "net.minecraft" and the artifact id is one of ["client", "server", "joined"],
-    // then special handling is done to allow a setup of a vanilla dependency without the use of an external repository.
-    minecraft "net.minecraftforge:forge:${minecraft_version}-${forge_version}"
-
-    // Example mod dependency with JEI - using fg.deobf() ensures the dependency is remapped to your development mappings
-    // The JEI API is declared for compile time use, while the full JEI artifact is used at runtime
-    // compileOnly fg.deobf("mezz.jei:jei-${mc_version}-common-api:${jei_version}")
-    // compileOnly fg.deobf("mezz.jei:jei-${mc_version}-forge-api:${jei_version}")
-    // runtimeOnly fg.deobf("mezz.jei:jei-${mc_version}-forge:${jei_version}")
-
-    // Example mod dependency using a mod jar from ./libs with a flat dir repository
-    // This maps to ./libs/coolmod-${mc_version}-${coolmod_version}.jar
-    // The group id is ignored when searching -- in this case, it is "blank"
-    // implementation fg.deobf("blank:coolmod-${mc_version}:${coolmod_version}")
-
-    // For more info:
-    // http://www.gradle.org/docs/current/userguide/artifact_dependencies_tutorial.html
-    // http://www.gradle.org/docs/current/userguide/dependency_management.html
+    implementation minecraft.dependency("net.minecraftforge:forge:${minecraft_version}-${forge_version}")
+    annotationProcessor 'net.minecraftforge:eventbus-validator:7.0.1'
 }
 
 // This block of code expands all declared replace properties in the specified resource targets.
@@ -174,9 +106,6 @@ tasks.named('jar', Jar).configure {
             'Implementation-Vendor'   : mod_authors
         ])
     }
-
-    // This is the preferred method to reobfuscate your jar file
-    finalizedBy 'reobfJar'
 }
 
 // However if you are in a multi-project build, dev time needs unobfed jar files, so you can delay the obfuscation until publishing by doing:
@@ -266,24 +195,13 @@ task compileWebServer {
     dependsOn deleteWebServer
 
     doLast {
-        if (Os.isFamily(Os.FAMILY_WINDOWS)) {
-            exec {
-                workingDir "${project.projectDir}/../minecam-webserver/"
-                executable "${project.projectDir}/../minecam-webserver/gradlew.bat"
-                args "jar"
-            }
+        def webserverDir = file("${project.projectDir}/../minecam-webserver/")
+        if (OperatingSystem.current().isWindows()) {
+            runCmd(["${webserverDir}/gradlew.bat", 'jar'], webserverDir)
         }
         else {
-            exec {
-                workingDir "${project.projectDir}/../minecam-webserver/"
-                executable "chmod"
-                args "+x", "./gradlew"
-            }
-            exec {
-                workingDir "${project.projectDir}/../minecam-webserver/"
-                executable "${project.projectDir}/../minecam-webserver/gradlew"
-                args "jar"
-            }
+            runCmd(['chmod', '+x', './gradlew'], webserverDir)
+            runCmd(["${webserverDir}/gradlew", 'jar'], webserverDir)
         }
     }
 
@@ -294,12 +212,8 @@ task prepareAppDev {
     group 'minecam util'
 
     doLast {
-        if (Os.isFamily(Os.FAMILY_WINDOWS)) {
-            exec {
-                workingDir "${project.projectDir}/../minecam-app/"
-                executable "npm.cmd"
-                args "install"
-            }
+        if (OperatingSystem.current().isWindows()) {
+            runCmd(['npm.cmd', 'install'], file("${project.projectDir}/../minecam-app/"))
         }
         else {
             println "This command can only be run on Windows"
@@ -311,12 +225,8 @@ task openAppDev {
     group 'minecam util'
 
     doLast {
-        if (Os.isFamily(Os.FAMILY_WINDOWS)) {
-            exec {
-                workingDir "${project.projectDir}/../minecam-app/"
-                executable "npx.cmd"
-                args "tauri", "dev"
-            }
+        if (OperatingSystem.current().isWindows()) {
+            runCmd(['npx.cmd', 'tauri', 'dev'], file("${project.projectDir}/../minecam-app/"))
         }
         else {
             println "This command can only be run on Windows"
@@ -328,12 +238,8 @@ task buildApp {
     group 'minecam util'
 
     doLast {
-        if (Os.isFamily(Os.FAMILY_WINDOWS)) {
-            exec {
-                workingDir "${project.projectDir}/../minecam-app/"
-                executable "npx.cmd"
-                args "tauri", "build"
-            }
+        if (OperatingSystem.current().isWindows()) {
+            runCmd(['npx.cmd', 'tauri', 'build'], file("${project.projectDir}/../minecam-app/"))
         }
         else {
             println "This command can only be run on Windows"
@@ -367,11 +273,8 @@ task compileMacOSHelper {
     group 'minecam compile'
 
     doLast {
-        if (Os.isFamily(Os.FAMILY_MAC)) {
-            exec {
-                workingDir "${project.projectDir}/../minecam-macoshelper"
-                executable "${project.projectDir}/../minecam-macoshelper/compileHelper.sh"
-            }
+        if (OperatingSystem.current().isMacOsX()) {
+            runCmd(["${project.projectDir}/../minecam-macoshelper/compileHelper.sh"], file("${project.projectDir}/../minecam-macoshelper"))
         }
         else {
             println "This command can only be run on MacOS"
@@ -379,35 +282,23 @@ task compileMacOSHelper {
     }
 }
 
+// Prebuilt binaries live on the "resources" branch (link.rishabhroy.com used to
+// mirror them but that domain is retired) since they aren't buildable from this
+// repo alone on every platform (e.g. MineCam.exe needs Windows).
+def fetchStaticResource(String branchPath, File dest) {
+    if (dest.exists()) return
+    runCmd(['git', 'show', "origin/resources:${branchPath}"], null, dest)
+}
+
 task downloadStaticResources {
     group 'minecam compile'
 
-    def webviewsetup = new File("${project.projectDir}/src/main/resources/assets/minecam/MicrosoftEdgeWebview2Setup.exe")
-    if (!webviewsetup.exists()) {
-        new URL(
-                'https://link.rishabhroy.com/link/MicrosoftEdgeWebview2Setup.exe'
-        ).withInputStream{ i -> webviewsetup.withOutputStream{ it << i }}
-    }
-
-    def minecamhelper = new File("${project.projectDir}/src/main/resources/assets/minecam/MineCamHelper")
-    if (!minecamhelper.exists()) {
-        new URL(
-                'https://link.rishabhroy.com/link/MineCamHelper'
-        ).withInputStream{ i -> minecamhelper.withOutputStream{ it << i }}
-    }
-
-    def minecamapp = new File("${project.projectDir}/src/main/resources/assets/minecam/MineCam.exe")
-    if (!minecamapp.exists()) {
-        new URL(
-                'https://link.rishabhroy.com/link/MineCam.exe'
-        ).withInputStream{ i -> minecamapp.withOutputStream{ it << i }}
-    }
-
-    def webserver = new File("${project.projectDir}/src/main/resources/assets/minecam/MineCamWebServer.jar")
-    if (!webserver.exists()) {
-        new URL(
-                'https://link.rishabhroy.com/link/MineCamWebServer.jar'
-        ).withInputStream{ i -> webserver.withOutputStream{ it << i }}
+    doLast {
+        runCmd(['git', 'fetch', 'origin', 'resources'])
+        fetchStaticResource('MicrosoftEdgeWebview2Setup.exe', file("${project.projectDir}/src/main/resources/assets/minecam/MicrosoftEdgeWebview2Setup.exe"))
+        fetchStaticResource('MineCamHelper', file("${project.projectDir}/src/main/resources/assets/minecam/MineCamHelper"))
+        fetchStaticResource('MineCam.exe', file("${project.projectDir}/src/main/resources/assets/minecam/MineCam.exe"))
+        fetchStaticResource('MineCamWebServer.jar', file("${project.projectDir}/src/main/resources/assets/minecam/MineCamWebServer.jar"))
     }
 }
 
@@ -430,24 +321,12 @@ task minecamRunClient {
 
     dependsOn minecamPrepare
     doLast {
-        if (Os.isFamily(Os.FAMILY_WINDOWS)) {
-            exec {
-                workingDir "${project.projectDir}"
-                executable "${project.projectDir}/gradlew.bat"
-                args "runClient"
-            }
+        if (OperatingSystem.current().isWindows()) {
+            runCmd(["${project.projectDir}/gradlew.bat", 'runClient'], project.projectDir)
         }
         else {
-            exec {
-                workingDir "${project.projectDir}"
-                executable "chmod"
-                args "+x", "./gradlew"
-            }
-            exec {
-                workingDir "${project.projectDir}"
-                executable "${project.projectDir}/gradlew"
-                args "runClient"
-            }
+            runCmd(['chmod', '+x', './gradlew'], project.projectDir)
+            runCmd(["${project.projectDir}/gradlew", 'runClient'], project.projectDir)
         }
     }
 }

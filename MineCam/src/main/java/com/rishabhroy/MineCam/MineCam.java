@@ -1,7 +1,6 @@
 package com.rishabhroy.MineCam;
 
 import com.rishabhroy.MineCam.Util.Util;
-import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.fml.common.Mod;
 import net.minecraftforge.fml.event.lifecycle.FMLCommonSetupEvent;
 import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
@@ -12,9 +11,8 @@ import java.net.InetSocketAddress;
 @Mod("minecam")
 public class MineCam {
     public static boolean logging = true;
-    public MineCam() {
-        FMLJavaModLoadingContext.get().getModEventBus().addListener(this::setup);
-        MinecraftForge.EVENT_BUS.register(this);
+    public MineCam(FMLJavaModLoadingContext context) {
+        FMLCommonSetupEvent.getBus(context.getModBusGroup()).addListener(this::setup);
     }
 
     private void setup(final FMLCommonSetupEvent event) {
