@@ -19,11 +19,11 @@ func moveMouseTo(point: CGPoint, mouseDown: Bool, mouseUp: Bool, button: String,
             let ourEvent = CGEvent.init(source: nil);
             point2 = ourEvent?.location ?? point
         }
-        
+
         if (mouseDown) {
             CGEvent(mouseEventSource:nil,mouseType:CGEventType.leftMouseDown, mouseCursorPosition: point2, mouseButton: CGMouseButton.left)?.post(tap:CGEventTapLocation.cghidEventTap)
         }
-        
+
         if (mouseUp) {
             CGEvent(mouseEventSource:nil,mouseType:CGEventType.leftMouseUp, mouseCursorPosition: point2, mouseButton: CGMouseButton.left)?.post(tap:CGEventTapLocation.cghidEventTap)
         }
@@ -36,11 +36,11 @@ func moveMouseTo(point: CGPoint, mouseDown: Bool, mouseUp: Bool, button: String,
             let ourEvent = CGEvent.init(source: nil);
             point2 = ourEvent?.location ?? point
         }
-        
+
         if (mouseDown) {
             CGEvent(mouseEventSource:nil,mouseType:CGEventType.rightMouseDown, mouseCursorPosition: point2, mouseButton: CGMouseButton.right)?.post(tap:CGEventTapLocation.cghidEventTap)
         }
-        
+
         if (mouseUp) {
             CGEvent(mouseEventSource:nil,mouseType:CGEventType.rightMouseUp, mouseCursorPosition: point2, mouseButton: CGMouseButton.right)?.post(tap:CGEventTapLocation.cghidEventTap)
         }
@@ -64,22 +64,29 @@ extension String {
     }
 }
 
-let type = CommandLine.arguments[1]
+// ponytail: one persistent process reading commands from stdin, not a fresh
+// process per input event (that was starving the system of PIDs/FDs and made
+// events fire late or never). Same "type arg1 arg2 ..." grammar as before,
+// one command per line instead of one command per process.
+func handle(_ tokens: [Substring]) {
+    guard let type = tokens.first else { return }
 
-if (type == "mouse") {
-    let x = CommandLine.arguments[2]
-    let y = CommandLine.arguments[3]
-    let side = CommandLine.arguments[4]
-    let mouseDown = CommandLine.arguments[5]
-    let mouseUp = CommandLine.arguments[6]
-    let moveMouse = CommandLine.arguments[7]
-    let pt = CGPoint(x: Double(x)!, y: Double(y)!)
-    moveMouseTo(point: pt, mouseDown: mouseDown.bool!, mouseUp: mouseUp.bool!, button: side, moveMouse: moveMouse.bool!)
+    if type == "mouse", tokens.count >= 7 {
+        let pt = CGPoint(x: Double(tokens[1]) ?? 0, y: Double(tokens[2]) ?? 0)
+        moveMouseTo(
+            point: pt,
+            mouseDown: String(tokens[4]).bool ?? false,
+            mouseUp: String(tokens[5]).bool ?? false,
+            button: String(tokens[3]),
+            moveMouse: String(tokens[6]).bool ?? false
+        )
+    }
+
+    if type == "keyboard", tokens.count >= 3, let key = KeyCode[String(tokens[1])] {
+        pressKey(key: key, down: String(tokens[2]).bool ?? false)
+    }
 }
 
-if (type == "keyboard") {
-    let key = KeyCode[CommandLine.arguments[2]]
-    let down = CommandLine.arguments[3]
-    pressKey(key: key!, down: down.bool!)
+while let line = readLine(strippingNewline: true) {
+    handle(line.split(separator: " "))
 }
-

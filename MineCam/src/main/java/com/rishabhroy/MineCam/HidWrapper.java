@@ -1,23 +1,50 @@
 package com.rishabhroy.MineCam;
 
+import com.rishabhroy.MineCam.Util.ProcessOutputRedirectThread;
 import com.rishabhroy.MineCam.Util.Util;
 
 import java.awt.*;
+import java.io.BufferedWriter;
+import java.io.IOException;
+import java.io.OutputStreamWriter;
+import java.nio.charset.StandardCharsets;
 
 public class HidWrapper {
     public static String minecamhelperpath;
     public static Robot robot;
     private static volatile boolean canSendHelperUpdate = true;
 
-    static void setupMacHelper() {
+    // ponytail: one long-lived helper process fed commands over stdin, instead of
+    // spawning (and never reaping) a fresh process per mouse/key event. The old
+    // per-event exec() approach built up zombie processes and leaked pipe FDs,
+    // which is why input eventually stopped firing or fired minutes late.
+    private static Process helperProcess;
+    private static BufferedWriter helperStdin;
+
+    static synchronized void setupMacHelper() {
         HidWrapper.minecamhelperpath = Util.getResourceAsFile("assets/minecam/MineCamHelper", ".MineCamHelper").getAbsolutePath();
         try {
-            Runtime.getRuntime().exec("chmod +x " + minecamhelperpath);
+            Runtime.getRuntime().exec("chmod +x " + minecamhelperpath).waitFor();
+            HidWrapper.helperProcess = new ProcessBuilder(minecamhelperpath).start();
+            HidWrapper.helperStdin = new BufferedWriter(new OutputStreamWriter(helperProcess.getOutputStream(), StandardCharsets.UTF_8));
+            new ProcessOutputRedirectThread(helperProcess.getInputStream()).start();
+            new ProcessOutputRedirectThread(helperProcess.getErrorStream()).start();
         }
         catch (Exception e) {
             e.printStackTrace();
         }
         Util.log("HID: Mac Helper Setup");
+    }
+
+    private static synchronized void sendHelperCommand(String command) {
+        try {
+            helperStdin.write(command);
+            helperStdin.newLine();
+            helperStdin.flush();
+        }
+        catch (IOException e) {
+            e.printStackTrace();
+        }
     }
 
     public static void setupHid() {
@@ -89,13 +116,8 @@ public class HidWrapper {
 
     public static void mousePress(int input, String button) {
         if (Util.IS_MAC) {
-            try {
-                if (canSendHelperUpdate) {
-                    Runtime.getRuntime().exec(minecamhelperpath + " mouse 0 0 " + button + " true false false");
-                }
-            }
-            catch (Exception e) {
-                e.printStackTrace();
+            if (canSendHelperUpdate) {
+                sendHelperCommand("mouse 0 0 " + button + " true false false");
             }
         }
         else {
@@ -105,13 +127,8 @@ public class HidWrapper {
 
     public static void mouseRelease(int input, String button) {
         if (Util.IS_MAC) {
-            try {
-                if (canSendHelperUpdate) {
-                    Runtime.getRuntime().exec(minecamhelperpath + " mouse 0 0 " + button + " false true false");
-                }
-            }
-            catch (Exception e) {
-                e.printStackTrace();
+            if (canSendHelperUpdate) {
+                sendHelperCommand("mouse 0 0 " + button + " false true false");
             }
         }
         else {
@@ -121,13 +138,8 @@ public class HidWrapper {
 
     public static void mouseMove(int x, int y) {
         if (Util.IS_MAC) {
-            try {
-                if (canSendHelperUpdate) {
-                    Runtime.getRuntime().exec(minecamhelperpath + " mouse " + x + " " + y + " left false false true");
-                }
-            }
-            catch (Exception e) {
-                e.printStackTrace();
+            if (canSendHelperUpdate) {
+                sendHelperCommand("mouse " + x + " " + y + " left false false true");
             }
         }
         else {
@@ -137,13 +149,8 @@ public class HidWrapper {
 
     public static void keyPress(int input, String button) {
         if (Util.IS_MAC) {
-            try {
-                if (canSendHelperUpdate) {
-                    Runtime.getRuntime().exec(minecamhelperpath + " keyboard " + button + " true");
-                }
-            }
-            catch (Exception e) {
-                e.printStackTrace();
+            if (canSendHelperUpdate) {
+                sendHelperCommand("keyboard " + button + " true");
             }
         }
         else {
@@ -153,13 +160,8 @@ public class HidWrapper {
 
     public static void keyRelease(int input, String button) {
         if (Util.IS_MAC) {
-            try {
-                if (canSendHelperUpdate) {
-                    Runtime.getRuntime().exec(minecamhelperpath + " keyboard " + button + " false");
-                }
-            }
-            catch (Exception e) {
-                e.printStackTrace();
+            if (canSendHelperUpdate) {
+                sendHelperCommand("keyboard " + button + " false");
             }
         }
         else {
